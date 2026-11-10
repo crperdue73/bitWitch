@@ -1,0 +1,57 @@
+name: bitwitch
+
+# bitWitch — the attack runner behind a web form.
+#
+# There is no target allowlist in the code, by request: this is meant to be
+# the lab's Kali box with less overhead. The boundary is the lab network,
+# configured here, not a check inside the app.
+#
+# The one thing this file does control is where the container can reach.
+# Put it on the lab network only. Do not attach it to anything that also
+# carries a route to the wider world unless you mean it.
+
+services:
+  bitwitch:
+    build: .
+    image: bitwitch:latest
+    container_name: bitwitch
+    restart: unless-stopped
+    ports:
+      # Bind to the lab-facing address, not 0.0.0.0, unless you want the
+      # school network to find this. Same reasoning as Trapdoor's LAB_BIND_IP.
+      - "${BITWITCH_BIND_IP:-0.0.0.0}:${BITWITCH_PORT:-8099}:8099"
+    environment:
+      # Classroom password. Required unless BITWITCH_PASSWORD is empty,
+      # in which case the form only asks for a name.
+      BITWITCH_PASSWORD: "${BITWITCH_PASSWORD:?set BITWITCH_PASSWORD in .env}"
+      # Unlocks /admin (target scope). Empty disables admin sign-in.
+      BITWITCH_ADMIN_PASSWORD: "${BITWITCH_ADMIN_PASSWORD:-}"
+      # Sessions are signed with this. Regenerate per term.
+      BITWITCH_SECRET: "${BITWITCH_SECRET:-}"
+      BITWITCH_SCOPE_FILE: "/data/scope.json"
+      BITWITCH_MAX_JOBS_PER_MIN: "20"
+      BITWITCH_TIMEOUT: "600"
+      BITWITCH_MAX_LINES: "4000"
+    volumes:
+      # Run history and the target scope. One JSONL line per run:
+      # who, what, where, why it was allowed, verdict.
+      - ./data:/data
+    networks:
+      - labnet
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  labnet:
+    # A network that already reaches the lab.
+    # If Trapdoor's stack is what you're testing, point this at the same
+    # network Trapdoor's published ports are on.
+    name: ${BITWITCH_NETWORK:-labnet}
+    external: ${BITWITCH_NETWORK_EXTERNAL:-false}
