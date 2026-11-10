@@ -283,13 +283,21 @@ def _within_rate(operator: str) -> bool:
 # --------------------------------------------------------------------------
 # pages
 
+def _page(title: str, body: str, body_class: str = "") -> str:
+    """Render the shell. Centralised so a page cannot forget body_class."""
+    return _PAGE.format(title=title, body=body, body_class=body_class)
+
+
 def _render_login(request: Request, error: str = "") -> str:
     err = f'<p class="err">{error}</p>' if error else ""
-    return _PAGE.format(
-        title="sign in",
+    return _page(
+        "sign in",
+        body_class="login",
         body=f"""
+<img class="login-art" src="/static/img/logo.png"
+     alt="bitWitch — hax0rgrrl">
 <div class="card narrow">
-  <h1>bitWitch 🪛</h1>
+  <h2>sign in</h2>
   <p class="sub">Sign in so the log knows whose run is whose.</p>
   {err}
   <form method="post" action="/login">
@@ -318,11 +326,17 @@ def _render_index(request: Request) -> str:
         ' · <a href="/admin">admin</a>' if s["role"] == "admin" else ""
     )
 
-    return _PAGE.format(
-        title="bitWitch",
+    return _page(
+        "bitWitch",
         body=f"""
+<div class="masthead">
+  <img class="mark" src="/static/img/mark.png" alt="">
+  <div>
+    <h1>bit<em>Witch</em> 🪛</h1>
+    <p class="tag">hax0rgrrl · attack lab</p>
+  </div>
+</div>
 <div class="card">
-  <h1>bitWitch 🪛</h1>
   <p class="sub">Signed in as <b>{s["name"]}</b> ({s["role"]}){admin_link} · <a href="/logout">sign out</a></p>
   <p class="sub">{scope_line}</p>
   <form id="run">
@@ -350,11 +364,18 @@ def _render_admin(request: Request, session: dict, error: str = "") -> str:
         if sc["restricted"]
         else '<p class="free">No scope set. Students can reach anything this container can.</p>'
     )
-    return _PAGE.format(
-        title="scope",
+    return _page(
+        "scope",
         body=f"""
+<div class="masthead">
+  <img class="mark" src="/static/img/mark.png" alt="">
+  <div>
+    <h1>bit<em>Witch</em> 🪛</h1>
+    <p class="tag">hax0rgrrl · target scope</p>
+  </div>
+</div>
 <div class="card">
-  <h1>Target scope</h1>
+  <h2>Target scope</h2>
   <p class="sub">Signed in as <b>{session["name"]}</b> (admin) · <a href="/">back to runs</a> · <a href="/logout">sign out</a></p>
   {state}
   {err}
@@ -378,8 +399,9 @@ _PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title} · bitWitch</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="icon" type="image/png" href="/static/img/icon.png">
 </head>
-<body>
+<body class="{body_class}">
 {body}
 </body>
 </html>"""

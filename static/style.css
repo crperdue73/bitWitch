@@ -1,108 +1,226 @@
+/* bitWitch — built around the full-hood logo.
+ *
+ * The palette is sampled from the art, not picked: the ground is #040203 and the
+ * accent is #F8148F. The logo is a poster lockup — hood, mask, wordmark, tagline
+ * — so it is used whole and large, never cropped to a square that would cut the
+ * wordmark off. The one crop is a head-only badge for the masthead.
+ */
+
 :root {
-  --bg: #0e1014;
-  --panel: #171a21;
-  --line: #262b36;
-  --ink: #dfe3ea;
-  --dim: #8b93a3;
-  --accent: #d4a017;
-  --ok: #4caf7d;
-  --bad: #e05c5c;
-  --warn: #d4a017;
+  --bg:        #050408;
+  --panel:     #0d0a12;
+  --panel-2:   #120d19;
+  --line:      #2a1526;
+  --line-hi:   #4a1f3d;
+  --ink:       #ece6ef;
+  --dim:       #9a8ba3;
+  --accent:    #f8148f;   /* sampled from the logo */
+  --accent-2:  #f7a2cc;
+  --accent-dk: #9c1c57;
+  --ok:        #43d39e;
+  --bad:       #ff4d6d;
+  --warn:      #ffb84d;
+  --glow:      0 0 28px rgba(248, 20, 143, .30);
 }
 
 * { box-sizing: border-box; }
 
+html, body { min-height: 100%; }
+
 body {
   margin: 0;
-  padding: 2rem 1rem 4rem;
+  padding: 0 1rem 4rem;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  -webkit-font-smoothing: antialiased;
 }
+
+/* ---------------------------------------------------------------- masthead */
+
+.masthead {
+  max-width: 980px;
+  margin: 0 auto 1.5rem;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  padding: 1.1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background:
+    radial-gradient(120% 160% at 0% 0%, rgba(248, 20, 143, .13), transparent 60%),
+    linear-gradient(180deg, var(--panel), var(--panel-2));
+}
+
+/* The head-only crop. The wordmark beside it is real text, so it stays crisp
+ * and selectable at every size. */
+.masthead .mark {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  border-radius: 50%;
+  border: 1px solid var(--line-hi);
+  box-shadow: var(--glow);
+  object-fit: cover;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: .05em;
+  line-height: 1.1;
+}
+
+.masthead h1 em {
+  font-style: normal;
+  color: var(--accent);
+  text-shadow: var(--glow);
+}
+
+.masthead .tag {
+  margin: .22rem 0 0;
+  font-size: .72rem;
+  color: var(--dim);
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------- cards */
 
 .card {
-  max-width: 900px;
+  max-width: 980px;
   margin: 0 auto 1.25rem;
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel), var(--panel-2));
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 1.25rem 1.5rem;
+  border-radius: 10px;
+  padding: 1.35rem 1.6rem;
 }
 
-.card.narrow { max-width: 420px; margin-top: 4rem; }
-
-h1 { margin: 0 0 .25rem; font-size: 1.4rem; letter-spacing: .02em; }
-h2 { margin: 0 0 1rem; font-size: 1rem; color: var(--dim); font-weight: 600;
-     text-transform: uppercase; letter-spacing: .08em; }
+h2 {
+  margin: 0 0 1rem;
+  font-size: .76rem;
+  color: var(--dim);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .16em;
+}
 
 .sub { color: var(--dim); margin: 0 0 1.25rem; font-size: .85rem; }
-.sub a { color: var(--accent); }
+.sub a { color: var(--accent); text-decoration: none; }
+.sub a:hover { color: var(--accent-2); text-decoration: underline; }
 
-label { display: block; margin-bottom: .9rem; color: var(--dim); font-size: .85rem; }
+/* ---------------------------------------------------------------- form */
 
-input, select, button {
+label { display: block; margin-bottom: .9rem; color: var(--dim); font-size: .82rem; }
+
+input, select, button, textarea {
   font: inherit;
   width: 100%;
-  margin-top: .3rem;
-  padding: .55rem .7rem;
-  background: #0b0d11;
+  margin-top: .35rem;
+  padding: .6rem .75rem;
+  background: #07050b;
   color: var(--ink);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
-input:focus, select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(248, 20, 143, .18);
+}
+
+textarea { resize: vertical; }
 
 button {
+  margin-top: .4rem;
   background: var(--accent);
-  color: #14161b;
-  font-weight: 700;
+  color: #10020a;
+  font-weight: 800;
   border: 0;
   cursor: pointer;
-  letter-spacing: .04em;
+  letter-spacing: .1em;
   text-transform: uppercase;
-  font-size: .8rem;
+  font-size: .82rem;
+  transition: filter .12s, box-shadow .12s;
 }
 
-button:hover { filter: brightness(1.1); }
-button:disabled { opacity: .45; cursor: not-allowed; }
+button:hover:not(:disabled) { filter: brightness(1.12); box-shadow: var(--glow); }
+button:disabled { opacity: .4; cursor: not-allowed; }
 
-.hint { color: var(--dim); font-size: .8rem; margin: -.55rem 0 .9rem; min-height: 1.2em; }
-.err { color: var(--bad); font-size: .85rem; }
-.opt { color: var(--dim); opacity: .7; font-size: .75rem; }
-.warn { color: var(--warn); font-size: .85rem; margin: .5rem 0; }
-.free { color: var(--ok); font-size: .85rem; margin: .5rem 0; }
+.hint { color: var(--dim); font-size: .79rem; margin: -.5rem 0 .9rem; min-height: 1.2em; }
+.err  { color: var(--bad);   font-size: .85rem; }
+.opt  { color: var(--dim); opacity: .7; font-size: .75rem; }
+.warn { color: var(--warn);  font-size: .85rem; margin: .5rem 0; }
+.free { color: var(--ok);    font-size: .85rem; margin: .5rem 0; }
 
-textarea {
-  font: inherit;
-  width: 100%;
-  margin-top: .3rem;
-  padding: .55rem .7rem;
-  background: #0b0d11;
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  resize: vertical;
+/* ---------------------------------------------------------------- output */
+
+.status {
+  font-size: .74rem;
+  margin-left: .5rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: .1em;
 }
-
-textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
-
-.status { font-size: .8rem; margin-left: .5rem; color: var(--dim); text-transform: none; letter-spacing: 0; }
-.status.pass { color: var(--ok); }
-.status.fail { color: var(--bad); }
+.status.pass    { color: var(--ok); }
+.status.fail    { color: var(--bad); }
 .status.blocked { color: var(--warn); }
 .status.running { color: var(--accent); }
 
 pre {
   margin: 0;
-  padding: 1rem;
-  background: #08090c;
+  padding: 1rem 1.1rem;
+  background: #040307;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: .82rem;
-  line-height: 1.45;
+  line-height: 1.5;
   max-height: 62vh;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ---------------------------------------------------------------- login */
+
+body.login {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem 1rem;
+  gap: 1.4rem;
+}
+
+/* No backdrop art. A blurred copy of the lockup behind it lifted the page
+ * off true black (#12030d in the corners) while the logo sits on #000, so the
+ * image read as a pasted rectangle. Flat black lets the art blend in. */
+body.login {
+  background: #000;
+}
+
+.login-art {
+  width: min(300px, 62vw);
+  height: auto;
+  filter: drop-shadow(0 18px 44px rgba(0, 0, 0, .8))
+          drop-shadow(0 0 22px rgba(248, 20, 143, .22));
+}
+
+body.login .card {
+  width: 100%;
+  max-width: 420px;
+  backdrop-filter: blur(8px);
+  background: rgba(11, 8, 16, .90);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .65);
+}
+
+@media (max-width: 560px) {
+  .masthead { padding: .9rem 1rem; gap: .75rem; }
+  .masthead h1 { font-size: 1.25rem; }
+  .masthead .mark { width: 42px; height: 42px; flex-basis: 42px; }
+  .card { padding: 1.1rem 1.15rem; }
+  .login-art { width: min(220px, 55vw); }
 }
