@@ -1,3 +1,11 @@
+<div align="center">
+
+![bitWitch — hax0rgrrl](docs/assets/bitwitch-banner.jpg)
+
+**Automated Adversary • Cybersecurity Education • Contained & Controlled**
+
+</div>
+
 # bitWitch 🪛
 
 A web front end for attack runs against the lab. Pick an attack, type a target,
