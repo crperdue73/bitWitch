@@ -17,7 +17,29 @@ RUN apt-get update \
       sshpass \
       openssh-client \
       ca-certificates \
+      gobuster \
+      hydra \
+      sqlmap \
+      netcat-openbsd \
  && rm -rf /var/lib/apt/lists/*
+
+# Nikto is not packaged in Debian, so it is built from source. It needs a
+# handful of Perl modules that are packaged, and one (XML::Writer) that must be
+# named explicitly — without it nikto exits with "Required module not found"
+# before it scans anything.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      perl \
+      libnet-ssleay-perl \
+      libjson-perl \
+      libxml-writer-perl \
+      git \
+ && git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
+ && apt-get purge -y git && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/* /opt/nikto/.git \
+ && printf '#!/bin/sh\nexec perl /opt/nikto/program/nikto.pl "$@"\n' > /usr/local/bin/nikto \
+ && chmod 755 /usr/local/bin/nikto \
+ && nikto -Version
 
 WORKDIR /app
 
@@ -26,6 +48,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY static ./static
+COPY tests ./tests
 
 RUN mkdir -p /data
 VOLUME /data

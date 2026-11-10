@@ -148,6 +148,8 @@ def api_run(
     attack: str = Form(...),
     target: str = Form(...),
     port: str = Form(""),
+    path: str = Form("/"),
+    protocol: str = Form("ssh"),
 ):
     session = _session(request)
     if session is None:
@@ -185,7 +187,16 @@ def api_run(
     if not _within_rate(operator):
         raise HTTPException(429, "too many runs — wait a minute")
 
-    job = jobs.start(attack, target, port_val, operator, scope_note=reason)
+    # Optional per-attack parameters. They are passed through and the job
+    # runner only hands them to a module whose signature accepts them, so an
+    # attack that ignores these is unaffected.
+    opts: dict = {}
+    if path.strip() and path.strip() != "/":
+        opts["path"] = path.strip()
+    if protocol.strip():
+        opts["protocol"] = protocol.strip()
+
+    job = jobs.start(attack, target, port_val, operator, scope_note=reason, opts=opts)
     return JSONResponse(job.snapshot())
 
 

@@ -14,6 +14,7 @@ Design notes tied to Trapdoor's engagement report:
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import threading
@@ -45,6 +46,7 @@ class Job:
     port: int | None
     operator: str
     scope_note: str = ""
+    opts: dict = field(default_factory=dict)
     started: float = field(default_factory=time.time)
     finished: float | None = None
     lines: list[str] = field(default_factory=list)
@@ -129,6 +131,7 @@ def start(
     port: int | None,
     operator: str,
     scope_note: str = "",
+    opts: dict | None = None,
 ) -> Job:
     mod = attacks.get(attack_name)
     if mod is None:
@@ -141,6 +144,7 @@ def start(
         port=port,
         operator=operator or "anonymous",
         scope_note=scope_note,
+        opts=dict(opts or {}),
     )
     with _JOBS_LOCK:
         _JOBS[job.id] = job
@@ -155,7 +159,20 @@ def start(
         job.emit(f"[bitWitch] {datetime.now(timezone.utc).isoformat()}")
         job.emit("")
         try:
-            result = mod.run(target, port, job.emit) or {}
+            # Optional params (path, protocol, ...) are passed only when the
+            # module declares it takes them, so a module that predates the
+            # mechanism keeps working unchanged.
+            extra = job.opts or {}
+            sig = inspect.signature(mod.run)
+            takes_kwargs = any(
+                p.kind is inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            )
+            accepted = {
+                k: v for k, v in extra.items()
+                if takes_kwargs or k in sig.parameters
+            }
+            result = mod.run(target, port, job.emit, **accepted) or {}
             status = str(result.get("status", "") or "").strip().lower()
             if status == "complete":
                 # `complete` means the module ran and has nothing to assert —
@@ -168,8 +185,8 @@ def start(
                 status = "blocked"
                 job.emit("")
                 job.emit(
-                    f"[bitWitch] BLOCKED — module returned unrecognised "
-                    f"status {result.get('status')!r}"
+                    f"[bitWitch]   module returned unrecognised "
+                    f"status {result.get('status')!r}; nothing was tested"
                 )
             job.status = status
             job.summary = str(result.get("summary", "") or "")
@@ -177,13 +194,19 @@ def start(
             job.status = "blocked"
             job.summary = str(exc)
             job.emit("")
-            job.emit(f"[bitWitch] BLOCKED — {exc}")
+            # The detailed reason is emitted here; `finally` prints the outcome
+            # line. Printing the reason in both places duplicated every blocked
+            # summary verbatim, which reads like two separate failures.
+            for line in str(exc).splitlines():
+                job.emit(f"[bitWitch]   {line}")
+            job.emit("")
+            job.emit("[bitWitch] nothing was tested — see the reason above.")
         except Exception as exc:
             job.status = "fail"
             error = f"{type(exc).__name__}: {exc}"
             job.summary = error
             job.emit("")
-            job.emit(f"[bitWitch] FAIL — {error}")
+            job.emit(f"[bitWitch] ERROR — {error}")
             job.emit(traceback.format_exc())
         finally:
             job.finished = time.time()
