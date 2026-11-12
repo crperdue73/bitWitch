@@ -184,12 +184,15 @@ would not.
 
 ## Status
 
+**v1.0 — declared done by Robbie on 2026-11-12.** This version is closed. New
+work belongs in the next project, not in this tree.
+
 Built and tested against live targets: 13 attack modules, auth, roles, scope
 enforcement, cookie forgery resistance, and the run log. Deployed at
-`http://192.168.111.34:8099` on the test box.
+`http://192.168.111.34:8099` on the test box, commit `8935a01`.
 
-**27 regression tests, all passing in the container.** Run them where the
-dependencies are:
+**27 regression tests, all passing in the container** (re-verified against the
+v1.0 build on 2026-11-12). Run them where the dependencies are:
 
     docker compose exec -T bitwitch python3 -m unittest discover -s tests
 
@@ -207,3 +210,21 @@ so there is no test framework to install.
 - `nikto_scan` → 17 findings in 9 seconds.
 - `hydra_brute` → `root:123456` accepted after 4 loud attempts.
 - `sql_check` → correctly refuses a URL with no parameters.
+
+## Deploying (read this before you touch the test box)
+
+The test box at `/opt/bitwitch` is **not a git checkout** — it is a plain copy of
+the tree. `git pull` there does nothing and never did. Static files are **baked
+into the image**, not bind-mounted, so a code change is invisible until the image
+is rebuilt.
+
+To ship a change:
+
+    # from the dev tree
+    scp static/style.css root@<box>:/opt/bitwitch/static/style.css
+
+    # on the box
+    cd /opt/bitwitch && docker compose up -d --build
+
+A hard refresh (Ctrl-Shift-R) is required afterwards — the stylesheet is cached
+aggressively and an ordinary reload will show the old CSS.
