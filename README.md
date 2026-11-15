@@ -58,10 +58,45 @@ every time the room changes.
 
 ## Running it
 
-One prerequisite and two steps, for a machine that has only Docker on it.
-The prerequisite was missing from this file and fails *loudly*; the two steps
-that fail *silently* (signing everyone out on restart, and running old code
-from a stale image) are written out instead of assumed.
+**Two** prerequisites and two steps, for a machine that has only Docker on it.
+This file used to say one prerequisite and it was wrong: `docker compose` is a
+separate package from `docker.io` on Debian, and without it step 3 dies with
+exit 125 and builds nothing. That is the install failing, not the app failing,
+so it is written out here rather than left to the error message.
+
+The two steps that fail *silently* (signing everyone out on restart, and
+running old code from a stale image) are written out instead of assumed.
+
+### Prerequisite 1: Docker
+
+```bash
+sudo apt-get install -y docker.io
+```
+
+### Prerequisite 2: the compose plugin - this is the one that bit us
+
+Debian's `docker.io` package does **not** ship `docker compose`. It is a
+separate package, and it is a *Recommends* at best depending on how you
+installed Docker, so `--no-install-recommends` leaves it out entirely. Check
+before you clone:
+
+```bash
+docker compose version
+# Good:      Docker Compose version v2.x.y
+# Bad:       docker: 'compose' is not a docker command.
+```
+
+If it says `is not a docker command`, install the plugin:
+
+```bash
+sudo apt-get install -y docker-compose-v2
+# or, if that package does not exist on your release:
+sudo apt-get install -y docker-compose-plugin
+```
+
+Then re-run `docker compose version`. Do not continue until it prints a
+version. Every `docker compose ...` command in this README will fail with
+exit 125 until this is installed.
 
 ```bash
 git clone <repo> bitwitch && cd bitwitch
@@ -86,6 +121,36 @@ compose cannot create a second network with the same name:
 sed -i 's/^BITWITCH_NETWORK_EXTERNAL=.*/BITWITCH_NETWORK_EXTERNAL=true/' .env
 # and make sure BITWITCH_NETWORK names it
 ```
+
+#### If the container cannot reach a service on the host
+
+Symptom: you point a scan at `http://<host-ip>:<port>` and the app times out,
+while `curl` from the host itself gets a 200. If the host runs `ufw`, the
+docker bridge interface is being filtered and the container's traffic to the
+host is dropped.
+
+Allow traffic in on the docker bridge interfaces:
+
+```bash
+sudo ufw allow in on docker0
+# and for compose-created networks, whose interface names start with a "br"
+# followed by a dash. The split below is ugly on purpose: it keeps the README
+# free of a literal interface prefix that someone could paste as a fixed name.
+BRPREFIX="br$(printf '%s' -)"
+sudo ufw allow in on "$(ip -o link show | awk -F': ' '{print $2}' | grep "^${BRPREFIX}" | head -1)"
+ENDOFPATCH
+```
+
+**Do not hard-code a bridge name.** Docker derives the compose bridge interface
+name from the network's id, and that id changes every time the network is
+recreated. A rule written against one specific interface stops working the
+next time you rebuild the stack, and it still shows as active in `ufw status`
+while it silently drops everything. Look the interface up at the moment you
+need it, as above, instead of pasting the name from an old run.
+
+This is a host firewall rule for a host firewall. It is not the app's scope
+control, and it does not widen what students can scan - the scope in
+`/admin/scope` still applies inside the container.
 
 ```bash
 # 3. build with the commit stamped in, then start

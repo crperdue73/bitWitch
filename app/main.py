@@ -35,6 +35,36 @@ CLASS_PASSWORD = os.environ.get("BITWITCH_PASSWORD", "")
 ADMIN_PASSWORD = os.environ.get("BITWITCH_ADMIN_PASSWORD", "")
 MAX_JOBS_PER_MIN = int(os.environ.get("BITWITCH_MAX_JOBS_PER_MIN", "20"))
 
+# Login throttle. Deliberately NOT the same counter as MAX_JOBS_PER_MIN.
+#
+# Why this exists at all: the run limiter was working and the login endpoint
+# had no limiter, so the box would run twenty jobs a minute and let you guess
+# passwords as fast as you could open sockets. 25 wrong passwords and never a
+# 429 reads like something nobody decided.
+#
+# Why it is not a fixed 60-second window: a window that empties on a timer
+# invites exactly MAX_LOGIN_PER_MIN guesses every minute, forever. That is
+# 10/minute/address, 14400/day, which is worse than nothing for the purpose a
+# login throttle has, while looking identical to a correct one in any test that
+# only counts to the first 429.
+#
+# Shape, stated so it can be tested rather than discovered:
+#   * Token bucket per client address, capacity MAX_LOGIN_FAILURES (default 5).
+#   * A successful login RESETS the bucket to full - a legitimate user never
+#     walks into a throttle they created by fat-fingering.
+#   * A failed login removes one token. At zero tokens, every further attempt
+#     is refused with 429 and NO password comparison happens.
+#   * Refills one token every LOCKOUT_SECONDS (default 60). So a wrong attempt
+#     costs a full minute of one slot; sustained guessing is 1/minute, not
+#     10/minute.
+#   * A failed attempt at zero tokens does NOT extend the penalty beyond the
+#     refill already scheduled - it cannot, because refill is time-based.
+#   * Once blocked, the client stays blocked until a token refills, so the
+#     block is a real lockout, and the legitimate user's recovery is to wait
+#     LOCKOUT_SECONDS and sign in correctly.
+MAX_LOGIN_FAILURES = int(os.environ.get("BITWITCH_MAX_LOGIN_FAILURES", "5"))
+LOCKOUT_SECONDS = float(os.environ.get("BITWITCH_LOCKOUT_SECONDS", "60"))
+
 # --------------------------------------------------------------------------
 # build stamp
 #
@@ -61,17 +91,57 @@ BUILT_AT = os.environ.get("BUILT_AT") or None
 ALLOW_UNSTAMPED = os.environ.get("BITWITCH_ALLOW_UNSTAMPED", "") == "1"
 
 
+def _warn_blank_admin() -> None:
+    """Say out loud, at startup, that nobody can be an admin on this box.
+
+    A blank BITWITCH_ADMIN_PASSWORD is not a security hole - the login path
+    refuses an admin attempt when no admin password is configured, so the box
+    cannot issue an admin session at all. It is a silent state: the app serves,
+    every session is a student, /admin is 403 for everyone including whoever
+    deployed it, and nothing anywhere says why. Silent states get fixed by
+    guesswork at 2am. So this one announces itself, names the consequence, and
+    does not stop the app from serving - serving students is a legitimate mode.
+    """
+    if ADMIN_PASSWORD:
+        return
+    print(
+        "[bitwitch] WARNING: BITWITCH_ADMIN_PASSWORD is blank.\n"
+        "  No admin session can be issued: every login is a STUDENT session and\n"
+        "  /admin + /admin/scope will answer 403 to everyone, including you.\n"
+        "  The target scope cannot be set until an admin password exists.\n"
+        "  Set BITWITCH_ADMIN_PASSWORD in .env to fix this. The app will keep serving.",
+        flush=True,
+    )
+
+
+_warn_blank_admin()
+
+
+_STAMP_WARNED = False
+
+
 def _require_stamp() -> None:
-    """Refuse to serve an unstamped build. Startup exception, non-zero exit."""
+    """Refuse to serve an unstamped build.
+
+    Called from a request path, not from import. An import-time check runs
+    once per worker start and then never again: the escape hatch below is
+    loud in the log for exactly one line, at boot, into a log nobody is
+    tailing, and the process then serves indefinitely behind it. A safety
+    valve that is cheap to leave on is a default, not a valve. So the check
+    costs attention on every request it lets through.
+    """
+    global _STAMP_WARNED
     if GIT_COMMIT:
         return
     if ALLOW_UNSTAMPED:
-        print(
-            "[bitwitch] WARNING: serving an UNSTAMPED build because "
-            "BITWITCH_ALLOW_UNSTAMPED=1. /api/version will report commit=null. "
-            "This is for local development only. Do not deploy this.",
-            flush=True,
-        )
+        if not _STAMP_WARNED or True:
+            print(
+                "[bitwitch] WARNING: serving an UNSTAMPED build because "
+                "BITWITCH_ALLOW_UNSTAMPED=1. /api/version will report commit=null. "
+                "This is for local development only. Do not deploy this.",
+                flush=True,
+            )
+            _STAMP_WARNED = True
         return
     raise SystemExit(
         "[bitwitch] REFUSING TO SERVE: no GIT_COMMIT in the image.\n"
@@ -82,9 +152,14 @@ def _require_stamp() -> None:
     )
 
 
-_require_stamp()
-
 app = FastAPI(title="bitWitch", docs_url=None, redoc_url=None)
+
+
+@app.middleware("http")
+async def _stamp_gate(request: Request, call_next):
+    """Cost-per-use, not cost-at-boot. Runs on every single request."""
+    _require_stamp()
+    return await call_next(request)
 
 
 # --------------------------------------------------------------------------
@@ -136,24 +211,41 @@ def login_submit(
     password: str = Form(""),
     admin_password: str = Form(""),
 ):
+    # Throttle first, before any comparison. A limiter placed after the
+    # password check still does the comparison, which is the work worth
+    # refusing. See MAX_LOGIN_FAILURES for the shape and the refill rule.
+    key = _client_key(request)
+    if not _login_allowed(key):
+        return HTMLResponse(
+            _render_login(request, "Too many sign-in attempts. Wait a minute."),
+            status_code=429,
+        )
+
     operator = operator.strip()
     if not operator:
         return HTMLResponse(_render_login(request, "Enter your name."), status_code=400)
 
     if CLASS_PASSWORD and not secrets.compare_digest(password, CLASS_PASSWORD):
+        _login_failed(key)
         return HTMLResponse(_render_login(request, "Wrong password."), status_code=401)
 
     # Admin is opt-in at the door: leave the field blank and you are a student.
     role = "student"
     if admin_password:
         if not ADMIN_PASSWORD:
+            _login_failed(key)
             return HTMLResponse(
                 _render_login(request, "No admin password is configured on this server."),
                 status_code=400,
             )
         if not secrets.compare_digest(admin_password, ADMIN_PASSWORD):
+            _login_failed(key)
             return HTMLResponse(_render_login(request, "Wrong admin password."), status_code=401)
         role = "admin"
+
+    # Correct credentials: reset the bucket so a user who fat-fingered twice
+    # and then got it right is not one mistake away from a lockout.
+    _login_succeeded(key)
 
     resp = RedirectResponse("/", status_code=303)
     resp.set_cookie(
@@ -375,6 +467,61 @@ def _within_rate(operator: str) -> bool:
     window.append(now)
     _RATE[operator] = window
     return True
+
+
+# client key -> [tokens: float, last_refill: float]
+_LOGIN_BUCKET: dict[str, list[float]] = {}
+
+
+def _login_refill(key: str) -> None:
+    """Time-based refill. One token per LOCKOUT_SECONDS, capped at capacity."""
+    now = time.time()
+    state = _LOGIN_BUCKET.get(key)
+    if state is None:
+        _LOGIN_BUCKET[key] = [float(MAX_LOGIN_FAILURES), now]
+        return
+    tokens, last = state
+    elapsed = now - last
+    if elapsed > 0 and LOCKOUT_SECONDS > 0:
+        gained = elapsed / LOCKOUT_SECONDS
+        if gained > 0:
+            tokens = min(float(MAX_LOGIN_FAILURES), tokens + gained)
+            state[0] = tokens
+            state[1] = now
+
+
+def _login_allowed(key: str) -> bool:
+    """Does this client have a token left to spend on a login attempt?
+
+    Checked BEFORE any password comparison. At zero tokens the request is
+    refused without doing the work, which is the whole point of a throttle.
+    """
+    _login_refill(key)
+    return _LOGIN_BUCKET[key][0] >= 1.0
+
+
+def _login_failed(key: str) -> None:
+    """Spend one token. Called only on a WRONG credential, never on success."""
+    _login_refill(key)
+    state = _LOGIN_BUCKET[key]
+    state[0] = max(0.0, state[0] - 1.0)
+
+
+def _login_succeeded(key: str) -> None:
+    """A correct login resets the bucket to full.
+
+    A legitimate user must not walk into a lockout they created by
+    mistyping three times and then remembering.
+    """
+    _LOGIN_BUCKET.pop(key, None)
+
+
+def _client_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _client_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 # --------------------------------------------------------------------------
