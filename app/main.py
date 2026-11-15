@@ -117,7 +117,6 @@ def _warn_blank_admin() -> None:
 _warn_blank_admin()
 
 
-_STAMP_WARNED = False
 
 
 def _require_stamp() -> None:
@@ -130,18 +129,26 @@ def _require_stamp() -> None:
     valve that is cheap to leave on is a default, not a valve. So the check
     costs attention on every request it lets through.
     """
-    global _STAMP_WARNED
     if GIT_COMMIT:
         return
     if ALLOW_UNSTAMPED:
-        if not _STAMP_WARNED or True:
-            print(
-                "[bitwitch] WARNING: serving an UNSTAMPED build because "
-                "BITWITCH_ALLOW_UNSTAMPED=1. /api/version will report commit=null. "
-                "This is for local development only. Do not deploy this.",
-                flush=True,
-            )
-            _STAMP_WARNED = True
+        # Deliberately no guard and no counter. This function is called from
+        # the request path, so it must warn on EVERY request: one line per
+        # request is the whole point of moving it off the import path. An
+        # earlier version had a module-level _STAMP_WARNED flag here and the
+        # condition read "not _STAMP_WARNED or True", which made the guard
+        # unconditionally true. The warning count came out right while the
+        # mechanism that was supposed to produce it was dead, which is worse
+        # than a wrong number because the dead flag reads like a working gate.
+        # If somebody later wants once-per-process behaviour, that is a
+        # different function with a different name and a test that proves it
+        # fires exactly once - not a flag bolted onto this one.
+        print(
+            "[bitwitch] WARNING: serving an UNSTAMPED build because "
+            "BITWITCH_ALLOW_UNSTAMPED=1. /api/version will report commit=null. "
+            "This is for local development only. Do not deploy this.",
+            flush=True,
+        )
         return
     raise SystemExit(
         "[bitwitch] REFUSING TO SERVE: no GIT_COMMIT in the image.\n"
@@ -517,10 +524,12 @@ def _login_succeeded(key: str) -> None:
 
 
 def _client_key(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    """The throttle key: the client address, not the operator name.
 
-
-def _client_key(request: Request) -> str:
+    An attacker picks the operator name; they cannot pick their own source
+    address nearly so easily. Keying on the name would let one client spend
+    a different bucket for every name they typed.
+    """
     return request.client.host if request.client else "unknown"
 
 

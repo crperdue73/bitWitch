@@ -138,7 +138,6 @@ sudo ufw allow in on docker0
 # free of a literal interface prefix that someone could paste as a fixed name.
 BRPREFIX="br$(printf '%s' -)"
 sudo ufw allow in on "$(ip -o link show | awk -F': ' '{print $2}' | grep "^${BRPREFIX}" | head -1)"
-ENDOFPATCH
 ```
 
 **Do not hard-code a bridge name.** Docker derives the compose bridge interface
@@ -258,6 +257,15 @@ verdict for an actual test.
 - `decoy_wp_facade` — is `/wp-login.php` baited while `/wp-content/` 404s
 
 ### A note on nikto
+
+**There is no default target, and v0.1 does not ship one.** Nikto needs a host
+to point at, and naming one would mean deciding whose server this lab scans.
+That is a decision about somebody else's machine, so it is **declined, not
+unverified**: this release has no bundled target, no demo host, and no
+"just press run" example. The operator names a target, and the admin sets a
+scope before students can run anything outside it. A live-target mode, where
+the appliance ships with somewhere to aim, is v1.0 work and needs a host that
+belongs to this farm.
 
 Nikto is **not packaged in Debian**, so the image clones it from source and
 installs the Perl modules it needs. One of those, `XML::Writer`, must be named

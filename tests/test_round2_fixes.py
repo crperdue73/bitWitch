@@ -153,6 +153,94 @@ class StampPerRequestTests(unittest.TestCase):
     call site produces, and it is the O3 finding.
     """
 
+    def test_warning_count_tracks_request_count(self):
+        """D8. The 20-for-20 number could not tell "fires every time" from
+        "can never fire more than once", because both print 20.
+
+        So: two requests must give exactly 2, three must give exactly 3. A
+        constant in the condition produces the same number regardless of the
+        request count, which is the whole defect this is guarding.
+
+        Jim's phrasing, which is the reason this test exists: a number that
+        comes out right for the wrong mechanism is worse than one that comes
+        out wrong.
+        """
+        for n in (2, 3):
+            lines = _probe(
+                """
+import contextlib, io, sys
+sys.path.insert(0, ROOTPATH)
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    from app import main
+    from fastapi.testclient import TestClient
+    c = TestClient(main.app)
+    for _ in range(NREQ):
+        c.get("/api/health")
+print("warnings", buf.getvalue().count("WARNING: serving an UNSTAMPED build"))
+""".replace("NREQ", str(n))
+            )
+            got = int(lines[-1].split()[1])
+            self.assertEqual(
+                got, n,
+                f"{n} requests produced {got} warnings. The count must equal the "
+                "request count; a constant anywhere in the condition breaks this.",
+            )
+
+    def test_no_duplicate_function_definitions(self):
+        """A function defined twice is one function and one lie.
+
+        Found this while proving D8 red: _client_key was defined twice in
+        app/main.py, so the second body silently won and the first was a
+        decoy that a reader would find by searching. Same family as a flag
+        that is set and never read - code that looks alive and is not.
+        """
+        import ast as _ast
+
+        tree = _ast.parse((ROOT / "app" / "main.py").read_text())
+        seen: dict[str, int] = {}
+        for node in tree.body:
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                seen[node.name] = seen.get(node.name, 0) + 1
+        dupes = {n: c for n, c in seen.items() if c > 1}
+        self.assertEqual(
+            dupes, {},
+            f"duplicate top-level function definitions in app/main.py: {dupes}; "
+            "the later definition wins and the earlier one is a decoy",
+        )
+
+    def test_stamp_gate_has_no_dead_flag_and_no_constant(self):
+        """The mechanism check, kept separate from the count check.
+
+        Two requests -> 2 and three -> 3 both pass if the code prints twice for
+        two and three times for three. They also pass if somebody writes
+        "if True". This reads the source for the shape that produced D8, so the
+        count test and the mechanism test fail for different reasons.
+        """
+        code_lines = [
+            line for line in (ROOT / "app" / "main.py").read_text().splitlines()
+            if not line.lstrip().startswith("#")
+        ]
+        code = "\n".join(code_lines)
+        offenders = [
+            f"  line {i}: {line.strip()}"
+            for i, line in enumerate(code_lines, 1)
+            if "or True" in line
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            "app/main.py contains 'or True', which makes a guard "
+            "unconditionally true. That is the D8 shape: the number comes out "
+            "right while the mechanism is dead.\n" + "\n".join(offenders),
+        )
+        self.assertNotIn(
+            "_STAMP_WARNED",
+            code,
+            "app/main.py still references _STAMP_WARNED outside a comment; "
+            "either the flag is dead or the once-only guard is back",
+        )
+
     def test_warning_fires_once_per_request(self):
         lines = _probe(
             """
