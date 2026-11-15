@@ -11,12 +11,23 @@
 #
 #     python3 -m pip install -r requirements-test.txt
 #
-# Both are needed, and that was measured, not guessed. Installing fastapi alone
-# left all six erroring: app.main declares `Form(...)` parameters at module
-# scope, and FastAPI raises at import ("Form data requires python-multipart")
-# the moment it sees them. So the module-level guard checks for python-multipart
-# too — fastapi alone is still a broken checkout, and a skip that fires on a
-# half-installed environment is a skip that lies about why.
+# All three are needed, and each one was measured, not guessed:
+#
+#  - fastapi and python-multipart: installing fastapi alone left the app
+#    erroring at import. app.main declares `Form(...)` parameters at module
+#    scope and FastAPI raises ("Form data requires python-multipart") the moment
+#    it sees them.
+#  - httpx: FastAPI's TestClient is built on httpx. Without it the client cannot
+#    be constructed, and — this is the part that cost a reviewer an hour — the
+#    tests that need it SKIP, so the suite reports "OK (skipped=9)" and the word
+#    that survives in a summary is OK. Nine tests that did not run read as nine
+#    tests that passed.
+#
+# So the list was short one package while the skip message told the reader to
+# install from this list. The instruction and the remedy disagreed, and a reader
+# who followed the remedy did not fix the problem. That is worse than an error,
+# because an error is a result. Three packages now, and the guard refuses to
+# skip quietly (see _have_test_deps in the test file).
 
 # pinned to the version the container image runs; measure with:
 # docker compose exec -T bitwitch pip show fastapi
@@ -27,3 +38,8 @@ fastapi
 # same rule, same reason: measure with
 # docker compose exec -T bitwitch pip show python-multipart
 python-multipart
+
+# FastAPI's TestClient imports httpx. Naming it here is not decoration: without
+# it the nine code-level tests skip, and a skip count buried in a summary is how
+# a suite that did not run gets reported as a suite that passed.
+httpx

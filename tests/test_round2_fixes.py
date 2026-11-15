@@ -33,19 +33,67 @@ ROOT = Path(__file__).resolve().parent.parent
 # reason, not ERROR - that is the D5 finding, and a suite where the strongest
 # tests vanish into red on a box without the dep is the same defect wearing
 # different clothes. The skip is module-level and named so the count is honest.
-def _have_test_deps() -> bool:
-    for mod in ("fastapi", "httpx"):
+# (package name as it appears in requirements-test.txt, module name to import).
+# These differ for python-multipart: the distribution is "python-multipart" but
+# the module is "multipart". Importing the distribution name raises ImportError
+# on a correctly installed package, which made this guard report a full
+# environment as half-built. That is the same class of error as the finding it
+# exists to catch - a check that answers a question about the wrong object.
+TEST_DEPS = (
+    ("fastapi", "fastapi"),
+    ("python-multipart", "multipart"),
+    ("httpx", "httpx"),
+)
+TEST_DEP_PACKAGES = tuple(pkg for pkg, _ in TEST_DEPS)
+
+
+def _missing_test_deps() -> list[str]:
+    """Return the requirements-file names that are not importable."""
+    missing = []
+    for package, module in TEST_DEPS:
         try:
-            __import__(mod)
+            __import__(module)
         except Exception:
-            return False
-    return True
+            missing.append(package)
+    return missing
 
 
-HAVE_DEPS = _have_test_deps()
+MISSING_DEPS = _missing_test_deps()
+HAVE_DEPS = not MISSING_DEPS
+
+
+class _DepsGuard(unittest.TestCase):
+    """D10. All of the environment, or an honest failure.
+
+    The previous guard skipped when any dependency was missing, which turned
+    nine tests that never ran into "OK (skipped=9)" - and OK is the word that
+    survives into a summary. A reviewer following requirements-test.txt to the
+    letter got a green suite and a skip message naming the file as the remedy,
+    which is the one file that did not contain the missing package.
+
+    So: if NOTHING is installed, that is a bare checkout and skipping is
+    honest - the file says so and the count says so. If SOME are installed,
+    the environment is half-built and that is a FAILURE, because somebody
+    tried to prepare a test environment and almost did. Half an environment is
+    not a smaller environment, it is a broken one wearing the same word.
+    """
+
+    def test_test_dependencies_are_all_present_or_all_absent(self):
+        if not MISSING_DEPS or len(MISSING_DEPS) == len(TEST_DEP_PACKAGES):
+            return
+        installed = [m for m in TEST_DEP_PACKAGES if m not in MISSING_DEPS]
+        self.fail(
+            "Half a test environment: installed "
+            f"{', '.join(installed)}; missing {', '.join(MISSING_DEPS)}.\n"
+            "  Tests in this file would SKIP, and the suite would still print OK.\n"
+            "  Run:  pip install -r requirements-test.txt\n"
+            "  (python-multipart is easy to miss: fastapi alone is not enough.)"
+        )
+
+
 NEEDS_DEPS = unittest.skipUnless(
     HAVE_DEPS,
-    "needs fastapi+httpx: pip install -r requirements-test.txt",
+    "bare checkout: install fastapi+python-multipart+httpx via requirements-test.txt",
 )
 
 
