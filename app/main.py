@@ -35,6 +35,55 @@ CLASS_PASSWORD = os.environ.get("BITWITCH_PASSWORD", "")
 ADMIN_PASSWORD = os.environ.get("BITWITCH_ADMIN_PASSWORD", "")
 MAX_JOBS_PER_MIN = int(os.environ.get("BITWITCH_MAX_JOBS_PER_MIN", "20"))
 
+# --------------------------------------------------------------------------
+# build stamp
+#
+# The container image runs whatever was COPYed in at build time. `up -d`
+# without `--build` reuses the old image, so a "deployed" fix that was never
+# rebuilt looks exactly like a deployed fix from the outside. That is the whole
+# of D6: two people can compare notes about a live box and both be right about
+# different software.
+#
+# So the build stamps itself and the app says out loud what it is running.
+#
+# GIT_COMMIT is passed as a build arg. Absent, it is None — the build still
+# succeeds (a checkout with no git history is a legitimate way to build), but
+# the app REFUSES TO SERVE. An unstamped instance is not a deployment, and a
+# service that answers 200 while being unable to say what it is, is a service
+# that will be trusted past its provenance.
+#
+# BITWITCH_ALLOW_UNSTAMPED=1 is the documented escape hatch for local
+# development only. It is loud in the log, and the version endpoint reports
+# dirty/stamped accordingly so the exception is visible from outside.
+GIT_COMMIT = os.environ.get("GIT_COMMIT") or None
+GIT_DIRTY = os.environ.get("GIT_DIRTY", "").strip() == "1"
+BUILT_AT = os.environ.get("BUILT_AT") or None
+ALLOW_UNSTAMPED = os.environ.get("BITWITCH_ALLOW_UNSTAMPED", "") == "1"
+
+
+def _require_stamp() -> None:
+    """Refuse to serve an unstamped build. Startup exception, non-zero exit."""
+    if GIT_COMMIT:
+        return
+    if ALLOW_UNSTAMPED:
+        print(
+            "[bitwitch] WARNING: serving an UNSTAMPED build because "
+            "BITWITCH_ALLOW_UNSTAMPED=1. /api/version will report commit=null. "
+            "This is for local development only. Do not deploy this.",
+            flush=True,
+        )
+        return
+    raise SystemExit(
+        "[bitwitch] REFUSING TO SERVE: no GIT_COMMIT in the image.\n"
+        "  The app cannot say what software it is running, so a report from\n"
+        "  this instance cannot be trusted or reproduced.\n"
+        "  Build with:  docker compose build --build-arg GIT_COMMIT=$(git rev-parse HEAD)\n"
+        "  or export BITWITCH_ALLOW_UNSTAMPED=1 for local development only."
+    )
+
+
+_require_stamp()
+
 app = FastAPI(title="bitWitch", docs_url=None, redoc_url=None)
 
 
@@ -45,6 +94,34 @@ def index(request: Request):
     if not _auth_ok(request):
         return RedirectResponse("/login", status_code=303)
     return HTMLResponse(_render_index(request))
+
+
+@app.get("/api/version")
+def api_version():
+    """What software is this? Answers D6 from outside the box.
+
+    Unauthenticated on purpose. It carries no secrets and no run data — only
+    provenance. A version endpoint that needs a login cannot be used to check a
+    box you suspect is misconfigured, which is the one moment you need it.
+    """
+    return JSONResponse(
+        {
+            "commit": GIT_COMMIT,
+            "dirty": GIT_DIRTY,
+            "built_at": BUILT_AT,
+        }
+    )
+
+
+@app.get("/api/health")
+def api_health():
+    """Liveness. Deliberately thin: it reports that the process answers.
+
+    It does NOT report the commit. A health check that also answers "what
+    version" invites people to use it as a version check, and then a restart
+    looks like a deploy. Identity lives at /api/version; this only says alive.
+    """
+    return JSONResponse({"status": "ok"})
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -167,6 +244,26 @@ def api_run(
         # 403 with the reason, not a silent skip: a student should be told the
         # scope exists and what it is, so they learn the rule instead of
         # guessing why the tool "broke".
+        #
+        # The record is written BEFORE the refusal is returned. A refusal that
+        # cannot be recorded is not a refusal, it is an unverified claim — the
+        # student is told no and nothing durable says they asked. Writing it
+        # first means the only way to get a 403 with no record is a crash
+        # between the two, which cannot report success.
+        #
+        # If the write fails we return 500, not 403. Handing back a clean "no"
+        # when the audit trail is broken would turn a logging fault into a
+        # silent boundary crossing. The 500 should be unreachable; if it fires,
+        # that is its own alarm.
+        try:
+            jobs.record_refusal(attack, target, operator, reason)
+        except Exception as exc:
+            print(f"[main] refused run could not be recorded: {exc!r}")
+            raise HTTPException(
+                500,
+                "the attempt was refused and the refusal could not be logged; "
+                "this is a bug, not a scope decision",
+            ) from exc
         raise HTTPException(403, reason)
 
     port_val: int | None = None

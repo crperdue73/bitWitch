@@ -1,0 +1,29 @@
+# Test-only dependencies.
+#
+# `python3 -m unittest discover -s tests` needs these to run the full suite
+# outside the container image. Inside the container they are already installed
+# by requirements.txt, so this file exists for one person: whoever cloned the
+# repo and ran the tests on the host.
+#
+# Without them, the six cookie-integrity tests SKIP with a reason instead of
+# erroring. They are not counted in a total taken outside the container, and a
+# "21 passed" from a bare checkout is not the same claim as the container's 27.
+#
+#     python3 -m pip install -r requirements-test.txt
+#
+# Both are needed, and that was measured, not guessed. Installing fastapi alone
+# left all six erroring: app.main declares `Form(...)` parameters at module
+# scope, and FastAPI raises at import ("Form data requires python-multipart")
+# the moment it sees them. So the module-level guard checks for python-multipart
+# too — fastapi alone is still a broken checkout, and a skip that fires on a
+# half-installed environment is a skip that lies about why.
+
+# pinned to the version the container image runs; measure with:
+# docker compose exec -T bitwitch pip show fastapi
+# left unpinned until measured because an unmeasured pin is the bug this file
+# exists to fix.
+fastapi
+
+# same rule, same reason: measure with
+# docker compose exec -T bitwitch pip show python-multipart
+python-multipart

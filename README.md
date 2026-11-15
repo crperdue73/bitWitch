@@ -58,13 +58,52 @@ every time the room changes.
 
 ## Running it
 
+One prerequisite and two steps, for a machine that has only Docker on it.
+The prerequisite was missing from this file and fails *loudly*; the two steps
+that fail *silently* (signing everyone out on restart, and running old code
+from a stale image) are written out instead of assumed.
+
 ```bash
+git clone <repo> bitwitch && cd bitwitch
+
+# 1. .env — the compose file refuses to start without BITWITCH_PASSWORD
+#    (`:?set BITWITCH_PASSWORD in .env`), and a blank BITWITCH_SECRET makes
+#    every restart sign all students out.
 cp .env.example .env
-# edit .env: set BITWITCH_PASSWORD, BITWITCH_ADMIN_PASSWORD, BITWITCH_SECRET
-docker compose up -d --build
+sed -i "s/^BITWITCH_SECRET=.*/BITWITCH_SECRET=$(openssl rand -hex 32)/" .env
+# then edit .env and set BITWITCH_PASSWORD (and BITWITCH_ADMIN_PASSWORD if
+# the instructor should be able to set a target scope).
 ```
 
-Then open `http://<host>:8099`.
+**2. the network — nothing to do by default.** `docker-compose.yml` creates
+`labnet` itself (`external: false`). You only need this step if you want the
+container on an *existing* lab network that Trapdoor's ports are on — for
+example when `labnet` is already managed by another stack, in which case
+compose cannot create a second network with the same name:
+
+```bash
+# only if the network already exists and is managed elsewhere
+sed -i 's/^BITWITCH_NETWORK_EXTERNAL=.*/BITWITCH_NETWORK_EXTERNAL=true/' .env
+# and make sure BITWITCH_NETWORK names it
+```
+
+```bash
+# 3. build with the commit stamped in, then start
+GIT_COMMIT="$(git rev-parse HEAD)" \
+GIT_DIRTY="$([ -n "$(git status --porcelain)" ] && echo 1 || echo 0)" \
+BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  docker compose up -d --build
+```
+
+Then open `http://<host>:8099`, and check what you are actually running:
+
+```bash
+curl -s http://localhost:8099/api/version
+# {"commit":"<sha>","dirty":false,"built_at":"<utc>"}
+```
+
+If `commit` is `null` the image was built without a stamp and **the app will
+not serve** — that refusal is deliberate. See *Version stamping* below.
 
 `.env` holds passwords. It is gitignored. Do not commit it.
 
@@ -191,14 +230,61 @@ Built and tested against live targets: 13 attack modules, auth, roles, scope
 enforcement, cookie forgery resistance, and the run log. Deployed at
 `http://192.168.111.34:8099` on the test box, commit `8935a01`.
 
-**27 regression tests, all passing in the container** (re-verified against the
-v1.0 build on 2026-11-12). Run them where the dependencies are:
+**27 regression tests.** The count depends on where you run them, and the
+number is quoted with its environment because a total that quietly shrinks is
+worse than a red one:
 
+    # in the container — the full 27, nothing skipped
     docker compose exec -T bitwitch python3 -m unittest discover -s tests
+    # -> Ran 27 tests  OK
+
+    # a fresh clone on a host, no installs — 21 run, 6 skip
+    python3 -m unittest discover -s tests
+    # -> Ran 27 tests  OK (skipped=6)
+
+    # a fresh clone with the test deps installed — the full 27
+    python3 -m pip install -r requirements-test.txt
+    python3 -m unittest discover -s tests
+    # -> Ran 27 tests  OK
+
+The six that skip without dependencies are the cookie-integrity tests: they
+exercise `app.main`, which imports FastAPI and python-multipart at module
+scope. Without those packages they **skip with a stated reason** rather than
+erroring, because an error says "the checkout is broken" and a skip says "you
+did not install the test dependencies" — and only one of those is true.
+
+**Do not quote "21 passing" as the regression count.** Those six are the
+security tests. A total that drops them silently is the exact failure this
+paragraph exists to prevent.
 
 They cover the status vocabulary, the scope gate, cookie forgery, the module
-contract, and the hardcoded Trapdoor expectations. They are stdlib `unittest`,
-so there is no test framework to install.
+contract, the error paths of every attack module, and the hardcoded Trapdoor
+expectations. They are stdlib `unittest`; `requirements-test.txt` exists only
+for the FastAPI-dependent six.
+
+## Version stamping
+
+The image knows which commit it is, and says so at `GET /api/version`:
+
+    {"commit": "<sha>", "dirty": false, "built_at": "<utc iso8601>"}
+
+`GET /api/health` is liveness only and deliberately does not report a version,
+so a restart cannot be mistaken for a deploy.
+
+**Why this exists.** `docker compose up -d` without `--build` reuses the
+previous image. A fix that was committed but never rebuilt runs the *old* code
+while `git log` shows the new commit, and from outside the box those two states
+are identical. Two people can then compare notes about the same live URL and
+both be right about different software.
+
+**Unstamped builds refuse to serve.** If `GIT_COMMIT` is absent at build time
+the image still builds, but startup raises and the process exits non-zero.
+An instance that cannot say what it is running is not a deployment, and a
+200 from it is a claim nobody can reproduce.
+
+`BITWITCH_ALLOW_UNSTAMPED=1` is a local-development escape hatch only. It
+serves, logs a warning, and reports `commit: null` so the exception is visible
+from outside.
 
 **Verified against the live Trapdoor honeypot at `192.168.111.45`:**
 

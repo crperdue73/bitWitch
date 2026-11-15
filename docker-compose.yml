@@ -12,7 +12,20 @@ name: bitwitch
 
 services:
   bitwitch:
-    build: .
+    build:
+      context: .
+      args:
+        # Stamped at build time from the checkout, so the running container
+        # can say which commit it is. `up -d` without `--build` reuses the old
+        # image and keeps reporting the OLD commit — which is the point: the
+        # stamp tells you the truth about the running software, not about your
+        # working tree.
+        #
+        #   GIT_COMMIT="$(git rev-parse HEAD)" GIT_DIRTY="$([ -n "$(git status --porcelain)" ] && echo 1 || echo 0)" \
+        #     BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" docker compose build
+        GIT_COMMIT: "${GIT_COMMIT:-}"
+        GIT_DIRTY: "${GIT_DIRTY:-}"
+        BUILT_AT: "${BUILT_AT:-}"
     image: bitwitch:latest
     container_name: bitwitch
     restart: unless-stopped

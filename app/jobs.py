@@ -125,6 +125,51 @@ def _record(job: Job, result: dict | None, error: str | None) -> None:
         print(f"[jobs] failed to write run log: {traceback.format_exc()}")
 
 
+def record_refusal(
+    attack_name: str,
+    target: str,
+    operator: str,
+    reason: str,
+    port: int | None = None,
+) -> None:
+    """Append a durable record for a run that was refused before it started.
+
+    A refusal that cannot be recorded is not a refusal, it is an unverified
+    claim: the student was told no, and nothing durable says they asked. The
+    compose file promises the run log holds "who, what, where, why it was
+    allowed, verdict" — a refused attempt is the line an instructor most wants
+    to read, and it was the one line that never got written.
+
+    Same shape as an allowed record, so one parser reads both, with
+    ``status: refused`` and ``scope`` carrying the reason.
+
+    Unlike _record, this one **raises**. An allowed job that fails to log is a
+    lost line; a refused job that fails to log is a boundary crossed with no
+    trace, handed back as a clean 403. The caller turns this into a 500, which
+    should be unreachable in normal operation — if that 500 ever fires, it is
+    its own alarm.
+    """
+    RUN_LOG.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "job_id": None,
+        "attack": attack_name,
+        "target": target,
+        "port": port,
+        "operator": operator,
+        "scope": reason,
+        "status": "refused",
+        "summary": reason,
+        "elapsed_s": 0.0,
+        "truncated": False,
+        "error": None,
+        "result": None,
+        "lines": 0,
+    }
+    with RUN_LOG.open("a") as fh:
+        fh.write(json.dumps(entry) + "\n")
+
+
 def start(
     attack_name: str,
     target: str,

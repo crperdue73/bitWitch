@@ -12,6 +12,8 @@ from __future__ import annotations
 import urllib.error
 import urllib.request
 
+from ..jobs import Blocked
+
 NAME = "web_paths"
 LABEL = "Web path enumeration"
 DESC = "Request the bait paths a scanner tries first and report status codes."

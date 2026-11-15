@@ -43,6 +43,17 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# Build stamp. Passed as a build arg so the image knows what it is.
+# `docker compose build --build-arg GIT_COMMIT=$(git rev-parse HEAD)`.
+# Absent is allowed at build time and refused at run time by _require_stamp()
+# in app/main.py: an unstamped image builds, and then will not serve.
+ARG GIT_COMMIT=""
+ARG GIT_DIRTY=""
+ARG BUILT_AT=""
+ENV GIT_COMMIT=${GIT_COMMIT} \
+    GIT_DIRTY=${GIT_DIRTY} \
+    BUILT_AT=${BUILT_AT}
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

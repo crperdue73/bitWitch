@@ -22,10 +22,22 @@ What these cover, and why each one exists:
   Module contract. Every module in app/attacks/ must define the required
   attributes and a callable run(). A module that loads but is missing NAME
   would otherwise vanish from the menu with no error.
+
+  Error paths (tests/d3_error_paths.py). Every module is called on a closed
+  port and must raise Blocked, by type. The contract tests above only check
+  the shape of run(); a module missing an import crashes on its first real
+  failure and the suite stays green.
+
+Dependencies: everything here is stdlib. The cookie tests additionally need
+fastapi, because they exercise app.main. Without it they SKIP with a reason
+rather than error, and the skipped six must not be counted in a total.
+`pip install -r requirements-test.txt` for a bare checkout; inside the
+container they run because fastapi is already there.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -119,11 +131,70 @@ class ScopeTests(unittest.TestCase):
 # sessions / cookie integrity
 # ---------------------------------------------------------------------------
 
+def _have_test_deps() -> bool:
+    """Both, not just fastapi. Measured, not assumed.
+
+    Installing fastapi on its own still leaves every cookie test erroring:
+    app.main declares `Form(...)` parameters at module scope and FastAPI
+    raises RuntimeError at import time — "Form data requires
+    python-multipart" — before a single test method runs. A guard that checks
+    only fastapi would then collect the class and error six ways, which is the
+    exact fault this change was meant to remove.
+
+    So the guard runs the import that actually fails, and treats any failure
+    as "not installed here."
+    """
+    try:
+        import fastapi  # noqa: F401
+        import python_multipart  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+HAVE_FASTAPI = _have_test_deps()
+
+#: Guarded at module level and stdlib only, so the reason is computed before
+#: any test is collected. An ERROR here says "the checkout is broken." A SKIP
+#: says "you did not install the test dependencies." Those are different
+#: messages for the person holding a fresh clone, and only one of them is true.
+#:
+#: What is being skipped: the six strongest tests in this file — forged cookie,
+#: tampered role, garbage cookie, round-trip student, round-trip admin,
+#: tampered name. They exercise `app.main`, which imports FastAPI at module
+#: scope. They cannot run without it, and no amount of stdlib cleverness
+#: changes that; the code under test is the FastAPI app.
+#:
+# The app refuses to serve an unstamped build (D7). That refusal is correct for
+# a deployment and wrong for a test run, so the suite stamps itself before
+# importing app.main. This is NOT BITWITCH_ALLOW_UNSTAMPED: that flag says
+# "serve without provenance," and the tests do not want to serve. They want a
+# known commit so the module imports and the cookie logic can be exercised.
+# Setting a fake commit makes the tests a deployment of a named build, which is
+# exactly what they are.
+os.environ.setdefault("GIT_COMMIT", "0" * 40 + "-test")
+
+#: DO NOT COUNT THESE SIX IN A TOTAL TAKEN OUTSIDE THE CONTAINER. A run that
+#: reports "21 passed" in a bare checkout is a run that silently dropped the
+#: security tests, and a total that quietly shrinks is worse than a red one.
+#: Quote the count with its environment: 27 in the container, 21 here.
+_COOKIE_SKIP = (
+    "requires fastapi and python-multipart, which are runtime dependencies of "
+    "app.main and not installable via stdlib. Install the test deps "
+    "(`pip install -r requirements-test.txt`) or run inside the container. "
+    f"6 cookie-integrity tests skipped; do not count them in the total. "
+    f"environment: python {sys.version.split()[0]}"
+)
+
+
+@unittest.skipUnless(HAVE_FASTAPI, _COOKIE_SKIP)
 class CookieTests(unittest.TestCase):
     """The cookie carries name and role, signed. Forging it must fail.
 
     `_session` takes a Request, so the tests build the smallest thing that
     quacks: an object with a `.cookies` dict.
+
+    Skipped with a reason, not errored, when FastAPI is absent. See _COOKIE_SKIP.
     """
 
     def setUp(self):
